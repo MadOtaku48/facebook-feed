@@ -1,0 +1,19 @@
+# 개인정보 / 크롤링 데이터 (GitHub에 올라가면 안 되는 것들)
+friends.json
+fb_friend_posts.json
+fb_friend_posts.html
+fb_friend_posts.md
+images/
+
+# 로그
+*.log
+cron.log
+server.log
+
+# 시스템
+.DS_Store
+__pycache__/
+*.pyc
+
+# 레거시
+fb_render.py
