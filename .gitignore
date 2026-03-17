@@ -5,6 +5,9 @@ fb_friend_posts.html
 fb_friend_posts.md
 images/
 
+# Lockfile
+.crawl.lock
+
 # 로그
 *.log
 cron.log

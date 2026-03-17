@@ -467,61 +467,88 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 <div class="grid">{cards}</div></body></html>"""
 
 
+LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".crawl.lock")
+
 async def main():
+    # 동시 실행 방지 (크론 + 수동 크롤링 겹침 방지)
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE) as f:
+                info = f.read().strip()
+            print(f"⚠️  이미 크롤링이 실행 중입니다 ({info}). 종료합니다.")
+            print(f"   만약 비정상 종료로 잠금이 남아있다면: rm {LOCK_FILE}")
+        except Exception:
+            pass
+        return
+
+    try:
+        with open(LOCK_FILE, "w") as f:
+            f.write(f"PID={os.getpid()} started={datetime.now().isoformat()}")
+    except Exception:
+        pass
+
     headless = "--login" not in sys.argv
 
-    async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            PROFILE_DIR, headless=headless,
-            viewport={"width": 1440, "height": 900}, locale="ko-KR",
-            args=["--disable-blink-features=AutomationControlled"],
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        )
-        page = context.pages[0] if context.pages else await context.new_page()
+    try:
+        async with async_playwright() as p:
+            context = await p.chromium.launch_persistent_context(
+                PROFILE_DIR, headless=headless,
+                viewport={"width": 1440, "height": 900}, locale="ko-KR",
+                args=["--disable-blink-features=AutomationControlled"],
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            )
+            page = context.pages[0] if context.pages else await context.new_page()
 
-        if not await wait_for_login(page):
+            if not await wait_for_login(page):
+                await context.close()
+                return
+
+            # 이전 이미지 삭제
+            import shutil
+            img_dir = os.path.join(OUTPUT_DIR, "images")
+            if os.path.isdir(img_dir):
+                shutil.rmtree(img_dir)
+
+            friends = load_friends()
+            print(f"\n{len(friends)}명 포스트 수집 중 (각 {POSTS_PER_FRIEND}개)...\n")
+            results = []
+            for friend in friends:
+                result = await get_latest_posts(page, friend)
+                results.append(result)
+                if result["posts"]:
+                    for p in result["posts"]:
+                        pin = " [고정]" if p["pinned"] else ""
+                        print(f"  [{result['name']}] ({p['time']}{pin}) {p['text'][:70]}…")
+                else:
+                    print(f"  [{result['name']}] 포스트 없음")
+                print()
+
             await context.close()
-            return
 
-        # 이전 이미지 삭제
-        import shutil
-        img_dir = os.path.join(OUTPUT_DIR, "images")
-        if os.path.isdir(img_dir):
-            shutil.rmtree(img_dir)
+        # 저장
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-        friends = load_friends()
-        print(f"\n{len(friends)}명 포스트 수집 중 (각 {POSTS_PER_FRIEND}개)...\n")
-        results = []
-        for friend in friends:
-            result = await get_latest_posts(page, friend)
-            results.append(result)
-            if result["posts"]:
-                for p in result["posts"]:
-                    pin = " [고정]" if p["pinned"] else ""
-                    print(f"  [{result['name']}] ({p['time']}{pin}) {p['text'][:70]}…")
-            else:
-                print(f"  [{result['name']}] 포스트 없음")
-            print()
+        json_path = os.path.join(OUTPUT_DIR, "fb_friend_posts.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
 
-        await context.close()
+        html_path = os.path.join(OUTPUT_DIR, "fb_friend_posts.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(render_html(results))
 
-    # 저장
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+        active = len([r for r in results if r["posts"]])
+        print(f"{'='*60}")
+        print(f"완료: {active}/{len(results)}명 수집")
+        print(f"  JSON: {json_path}")
+        print(f"  HTML: {html_path}")
 
-    json_path = os.path.join(OUTPUT_DIR, "fb_friend_posts.json")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-
-    html_path = os.path.join(OUTPUT_DIR, "fb_friend_posts.html")
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(render_html(results))
-
-    active = len([r for r in results if r["posts"]])
-    print(f"{'='*60}")
-    print(f"완료: {active}/{len(results)}명 수집")
-    print(f"  JSON: {json_path}")
-    print(f"  HTML: {html_path}")
+    finally:
+        # lockfile 제거
+        try:
+            os.remove(LOCK_FILE)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
