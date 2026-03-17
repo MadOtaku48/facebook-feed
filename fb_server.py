@@ -333,8 +333,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     server = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"FB Feed 서버")
-    print(f"  피드:  http://100.85.240.119:{PORT}/")
-    print(f"  관리:  http://100.85.240.119:{PORT}/admin")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
